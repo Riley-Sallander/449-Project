@@ -1,49 +1,152 @@
-# History files
-.Rhistory
-.Rapp.history
+library(pROC)
+library(bestglm)
+library(dplyr)
+library(caret)
+library(ROSE)
+##data management 
+heart=read.csv("~/Desktop/449-MATH/framingham.csv")
+summary(heart)
+heartDF=as.data.frame(heart)
 
-# Session Data files
-.RData
-.RDataTmp
+heartdf=na.omit(heartDF)
+table(heartdf$diabetes)
 
-# User-specific files
-.Ruserdata
+set.seed(123)
+ind <- sample(2, nrow(heartdf), replace = TRUE, prob = c(0.7, 0.3))
+train <- heartdf[ind==1,]
+test <- heartdf[ind==2,]
 
-# Example code in package build process
-*-Ex.R
+table(train$TenYearCHD)
 
-# Output files from R CMD build
-/*.tar.gz
+trainO <- ovun.sample(TenYearCHD~., data = train, method = "over", N = 4000)$data
+table(trainO$TenYearCHD)
 
-# Output files from R CMD check
-/*.Rcheck/
 
-# RStudio files
-.Rproj.user/
+## Saturated model
+satur=glm(TenYearCHD~.,family=binomial,data=trainO)
+summary(satur)
 
-# produced vignettes
-vignettes/*.html
-vignettes/*.pdf
+## Best subset
 
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
-.httr-oauth
+rename(trainO, y=TenYearCHD)
+best.logit <- bestglm(trainO,
+                IC = "AIC",                 # Information criteria for
+                family=binomial,
+                method = "exhaustive")
 
-# knitr and R markdown default cache directories
-*_cache/
-/cache/
+summary(best.logit)
 
-# Temporary files created by R markdown
-*.utf8.md
-*.knit.md
+best.logit$BestModel
 
-# R Environment Variables
-.Renviron
+best.logit$Subsets
 
-# pkgdown site
-docs/
+##best model 
+best=glm(TenYearCHD~male+age+education+cigsPerDay+BPMeds+diabetes+totChol+sysBP+diaBP+glucose,family = "binomial",data=trainO)
+summary(best)
 
-# translation temp files
-po/*~
 
-# RStudio Connect folder
-rsconnect/
+## AIC= 4811 compared to saturated model with 4819 AIC. The best subset selection has a residual deviance of 40805 and the residual deviance of the saturated model is 4804.4 
+
+## Conf matrix and ROC AUC calculations
+pred <- predict(best, test, type="response") 
+
+threshold=0.6
+predicted_values<-ifelse(predict(best,test,type="response")>threshold,1,0)
+actual_values<-test$TenYearCHD
+conf_matrix<-table(predicted_values,actual_values)
+conf_matrix
+
+
+threshold=0.5
+predicted_values<-ifelse(predict(best,test,type="response")>threshold,1,0)
+actual_values<-test$TenYearCHD
+conf_matrix<-table(predicted_values,actual_values)
+conf_matrix
+
+
+threshold=0.4
+predicted_values<-ifelse(predict(best,test,type="response")>threshold,1,0)
+actual_values<-test$TenYearCHD
+conf_matrix<-table(predicted_values,actual_values)
+conf_matrix
+
+
+##Looking at random cutoff points the accuracy worsens and begins to over evaluate when going above or below .5 when above .5 it creates many false negatives which in a heart disease context is very dangerous. when below.4 the model creates more false positive which is not as harmful as false negatives.
+library(ROCR)
+roc_pred <- prediction(predictions = pred , labels = test$TenYearCHD)
+roc_perf <- performance(roc_pred , "tpr" , "fpr")
+plot(roc_perf,
+     colorize = TRUE,
+     print.cutoffs.at= seq(0,1,0.05),
+     text.adj=c(-0.2,1.7))
+
+(auc_ROCR <- performance(roc_pred, measure = "auc"))
+
+ (auc_ROCR <- auc_ROCR@y.values[[1]])
+
+## From the ROC curve we can see that the .5 cut off is the best overall accuracy without over predicting one or the other. The AUC is .73 which is not the best but creates some decent predictions.
+
+##Best Link
+best1=glm(TenYearCHD~male+age+education+cigsPerDay+BPMeds+diabetes+totChol+sysBP+diaBP+glucose,family = "binomial"(link = "logit"), data=trainO) 
+summary(best1)
+
+##The logit link function produces AIC simmilar to that of the best subset, slightly lower but roughly the same.
+
+train_control <- trainControl(method = "cv", number = 10)
+
+# train the model on training set
+trainO$TenYearCHD=as.factor(trainO$TenYearCHD)
+model <- train(TenYearCHD~male+age+education+cigsPerDay+BPMeds+diabetes+totChol+sysBP+diaBP+glucose,
+               data = trainO,
+               trControl = train_control,
+               method = "glm",
+               family=binomial())
+
+# print cv scores
+summary(model)
+
+res=model$result
+
+
+predk <- predict(model, test, type="prob")[,2]
+roc_predk <- prediction(predictions = predk , labels = test$TenYearCHD)
+roc_perfk <- performance(roc_predk , "tpr" , "fpr")
+plot(roc_perfk,
+     colorize = TRUE,
+     print.cutoffs.at= seq(0,1,0.05),
+     text.adj=c(-0.2,1.7))
+
+(auc_ROCRk <- performance(roc_predk, measure = "auc"))
+
+ (auc_ROCRk <- auc_ROCRk@y.values[[1]])
+##The average AIC is 4874 which is similar to that of the original model and the accuracy is 68%, Overall the ROC curves average area was .73 again, very simmilar to that of the single trained model meaning it is likely not overfit
+
+
+train_control <- trainControl(method = "LOOCV", number = 10)
+
+# train the model on training set
+trainO$TenYearCHD=as.factor(trainO$TenYearCHD)
+modelLO <- train(TenYearCHD~male+age+education+cigsPerDay+BPMeds+diabetes+totChol+sysBP+diaBP+glucose,
+               data = trainO,
+               trControl = train_control,
+               method = "glm",
+               family=binomial())
+
+# print cv scores
+summary(model)
+
+res=model$result
+
+predLO <- predict(modelLO, test, type="prob")[,2]
+roc_predLO <- prediction(predictions = predLO , labels = test$TenYearCHD)
+roc_perfLO <- performance(roc_predLO , "tpr" , "fpr")
+plot(roc_perfLO,
+     colorize = TRUE,
+     print.cutoffs.at= seq(0,1,0.05),
+     text.adj=c(-0.2,1.7))
+
+(auc_ROCRLO <- performance(roc_predLO, measure = "auc"))
+
+ (auc_ROCRLO <- auc_ROCRLO@y.values[[1]])
+##The average AIC is 4852 which is similar to that of the original model and the accuracy is 68%. Looking at the ROC curve the AUC is also .73 not the best but not the worst either.
+
