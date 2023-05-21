@@ -14,4 +14,8 @@ cholestoral levels, Systolic and diastolic blood pressure, and glucose level. Th
 into a factor and that was eduacation level. Other than that evey other categorical variable was binary so R was able to adress them 
 handily. The data set also had many a few data points with missing variables which were removed from the data set. 
 
+   When designing the model I first started with creating the saturated model and running a few tests on it. Since this is a 
+  binomial predictor problem I compared the models AIC's to eachother as well as looked as residual deviances. The saturated model 
+  Had an AIC of ~4800 and a residual deviance of 4000. From there, I ran a best subset algorithim to find the best subset of predictors.
+  This took a while to run but resulted 
   
